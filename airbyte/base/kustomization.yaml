@@ -1,0 +1,8 @@
+helmCharts:
+  - name: airbyte
+    repo: https://airbytehq.github.io/helm-charts/
+    version: 0.49.6
+    namespace: airbyte
+    releaseName: airbyte
+    valuesFile: values.yaml
+

@@ -1,0 +1,193 @@
+images:
+  airflow:
+    repository: "europe-west1-docker.pkg.dev/prj-astrafy-artifacts/airflow/astrafy-airflow"
+    tag: "dbfe18cf" #custom 2.8.1-python3.10
+  gitSync:
+    repository: registry.k8s.io/git-sync/git-sync
+    tag: v3.6.5
+    pullPolicy: IfNotPresent
+
+# Select certain nodes for airflow pods.
+# nodeSelector:
+#   type: mds
+
+data:
+  # Secret for postgresql connection
+  metadataSecretName: airflow-db-credentials
+  brokerUrlSecretName: airflow-broker-url
+
+# Do not create a postgresql database
+postgresql:
+  enabled: false
+
+# PgBouncer settings
+pgbouncer:
+  enabled: true
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+
+triggerer:
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+statsd:
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+# Webserver key
+# webserverSecretKey: 4a930cadd6e3c09707232b650b28f5ed
+
+webserver:
+  resources:
+    limits:
+      cpu: 2
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  extraVolumes:
+  - name: webserver-config
+    secret:
+      secretName: webserver-config
+      defaultMode: 0640
+      optional: true
+  extraVolumeMounts:
+  - name: webserver-config
+    mountPath: "/opt/airflow/webserver_config.py"
+    readOnly: true
+    subPath: "webserver_config.py"
+  livenessProbe:
+    initialDelaySeconds: 40
+    timeoutSeconds: 5
+    failureThreshold: 6
+
+  readinessProbe:
+    initialDelaySeconds: 40
+    timeoutSeconds: 5
+    failureThreshold: 6
+  # Number of webservers
+  replicas: 1
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+workers:
+  # hpa:
+  #   enabled: true
+  #   # Minimum number of workers created by HPA
+  #   minReplicaCount: 0
+  #   # Maximum number of workers created by HPA
+  #   maxReplicaCount: 4
+  #   # Specifications for which to use to calculate the desired replica count
+  #   metrics:
+  #   - type: Resource
+  #     resource:
+  #       name: cpu
+  #       target:
+  #         type: Utilization
+  #         averageUtilization: 80
+  resources:
+    limits:
+      cpu: 500m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+
+
+
+scheduler:
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+
+redis:
+  passwordSecretName: "airflow-redis-password"
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+
+#Dags
+dags:
+  gitSync:
+    enabled: true
+    repo: https://github.com/astrafy/airflow-dags.git
+    branch: main
+    depth: 1
+    subPath: "dags"
+    credentialsSecret: gitsync-creds
+
+# Fernet key
+fernetKeySecretName: fernet-key
+
+# Environment variables for the configuration
+# Check https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
+env:
+- name: AIRFLOW__WEBSERVER__BASE_URL
+  value: "https://airflow.tfm.online"
+- name: AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX
+  value: "True"
+- name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG
+  value: "True"
+- name: AIRFLOW__WEBSERVER__AUTHENTICATE
+  value: "True"
+- name: AIRFLOW__WEBSERVER__AUTH_BACKEND
+  value: "airflow.contrib.auth.backends.google_auth"
+- name: AIRFLOW__API__AUTH_BACKENDS
+  value: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.default"
+- name: AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT
+  value: "google-cloud-platform://"
+- name: AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT
+  value: "300"
+- name: AIRFLOW__WEBSERVER__INSTANCE_NAME
+  value: "ASTRAFY TEST"
+- name: AIRFLOW__WEBSERVER__NAVBAR_COLOR
+  value: "#397ded"
+- name: AIRFLOW__METRICS__OTEL_ON
+  value: "True"
+- name: AIRFLOW__METRICS__OTEL_HOST
+  value: "opentelemetry-collector.opentelemetry.svc.cluster.local"
+- name: AIRFLOW__METRICS__OTEL_PORT
+  value: "4318"
+- name: AIRFLOW__METRICS__OTEL_PREFIX
+  value: "airflow"
+- name: AIRFLOW__METRICS__OTEL_INTERVAL_MILLISECONDS
+  value: "30000"
+- name: AIRFLOW__METRICS__OTEL_SSL_ACTIVE
+  value: "False"
+
+# If deployed with ArgoCD or similar
+createUserJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+  annotations:
+    "sidecar.istio.io/inject": "false"
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"
+migrateDatabaseJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+  annotations:
+    "sidecar.istio.io/inject": "false"
+  serviceAccount:
+    # Annotations to add to worker kubernetes service account.
+    annotations:
+      "iam.gke.io/gcp-service-account": "sa-gke-test@gke.iam.gserviceaccount.com"

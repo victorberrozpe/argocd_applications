@@ -1,0 +1,7 @@
+helmCharts:
+  - name: lightdash
+    repo: https://lightdash.github.io/helm-charts
+    version: 0.8.9
+    releaseName: lightdash
+    namespace: lightdash
+    valuesFile: values.yaml

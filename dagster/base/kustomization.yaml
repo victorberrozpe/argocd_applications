@@ -1,0 +1,7 @@
+helmCharts:
+- name: dagster
+  repo: "https://dagster-io.github.io/helm"
+  version: 0.11.0
+  releaseName: dagster
+  namespace: dagster
+  valuesFile: values.yaml

@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1beta1 
+kind: VirtualService
+metadata:
+  name: vs-airflow
+  namespace: airflow
+spec:
+  gateways:
+  - istio-ingress/istio-gateway
+  hosts:
+  - airflow.astrafy.online
+  http:
+  - headers:
+      request:
+        set:
+          X-Forwarded-Proto: https
+    match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: airflow-webserver.airflow.svc.cluster.local
+        port:
+          number: 8080

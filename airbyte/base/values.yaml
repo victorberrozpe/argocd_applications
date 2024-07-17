@@ -1,0 +1,696 @@
+### TEST FOR RELEASE WORKFLOW
+
+## @section Global Parameters
+
+##  global -- Global params that are overwritten with umbrella chart
+global:
+  ##  serviceAccountName -- Service Account name override
+  serviceAccountName: &service-account-name "airbyte-ksa"
+  ##  deploymentMode -- Deployment mode, whether or not render the default env vars and volumes in deployment spec
+  deploymentMode: "oss"
+  edition: "community"
+
+  ##  database [object] -- Object used to overrite database configuration(to use external DB)
+  ##  database.secretName -- secret name where DB creds are stored
+  ##  database.secretValue -- secret value for database password
+  ##  database.host -- Database host override
+  ##  database.port -- Database port override
+  database:
+    secretName: "vault-airbyte-secrets"
+    host: "10.100.0.3"
+    port: "5432"
+  state:
+    ## state.storage.type Determines which state storage will be utilized.  One of "MINIO", "S3" or "GCS"
+    storage:
+      type: "GCS"
+  logs:
+    ## logs.storage.type Determines which log storage  will be utilized.  One of "MINIO", "S3" or "GCS"
+    ##                   Used in conjunction with logs.minio.*, logs.s3.* or logs.gcs.*
+    storage:
+      type: "GCS"
+    ##  logs.minio.enabled Switch to enable or disable the Minio helm chart
+    ##  logs.minio.nodeSelector [object] Node labels for pod assignment
+    ##  logs.minio.tolerations [array] Tolerations for webapp pod assignment.
+    ##  logs.minio.affinity [object] Affinity and anti-affinity for webapp pod assignment.
+    minio:
+      enabled: false
+    ##  logs.s3.enabled Switch to enable or disable custom S3 Log location
+    ##  logs.s3.bucket Bucket name where logs should be stored
+    ##  logs.s3.bucketRegion Region of the bucket (must be empty if using minio)
+    s3:
+      enabled: false
+      bucket: ""
+    ## Google Cloud Storage (GCS) Log Location Configuration
+    ##  logs.gcs.bucket GCS bucket name
+    ##  logs.gcs.credentials The path the GCS creds are written to
+    ##  logs.gcs.credentialsJson Base64 encoded json GCP credentials file contents
+    gcs:
+      bucket: "astrafy-gke-airbyte-logs"
+      # If you are mounting an existing secret to extraVolumes on scheduler, server and worker
+      # deployments, then set credentials to the path of the mounted JSON file
+      credentials: "/secrets/vault-airbyte-gcs-log-creds/gcp.json"
+
+  metrics:
+    metricClient: "otel"
+    otelCollectorEndpoint: "http://opentelemetry-collector.opentelemetry.svc.cluster.local:4317"
+## Pods Service Account
+## ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+##  serviceAccount.annotations -- [object] Annotations for service account. Evaluated as a template. Only used if `create` is `true`.
+##  serviceAccount.create -- Specifies whether a ServiceAccount should be created
+##  serviceAccount.name -- Name of the service account to use. If not set and create is true, a name is generated using the fullname template.
+##
+serviceAccount:
+  create: true
+  annotations:
+    "iam.gke.io/gcp-service-account": "sa-gke@astrafy-gke.iam.gserviceaccount.com"
+  name: *service-account-name
+
+webapp:
+  enabled: true
+  replicaCount: 2
+  nodeSelector:
+    node_pool: mds
+
+  resources:
+    limits:
+      cpu: 200m
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+  # containerSecurityContext:
+  #   runAsNonRoot: true
+  #   runAsUser: 1000  # Ensure this user exists in the Nginx Docker image
+  #   readOnlyRootFilesystem: false  # Nginx needs to write to certain directories, making it necessary to disable this
+
+  # extraVolumeMounts:
+  #   - name: var-run
+  #     mountPath: /var/run/
+  #   - name: var-cache-nginx
+  #     mountPath: /var/cache/nginx
+  #   - name: tmp
+  #     mountPath: /tmp  # Nginx might need a writable /tmp for various operations
+  #   - name: nginx-conf-d
+  #     mountPath: /etc/nginx/conf.d  # This should match where Nginx expects its configuration files
+
+  # extraVolumes:
+  #   - name: var-run
+  #     emptyDir: {}
+  #   - name: var-cache-nginx
+  #     emptyDir: {}
+  #   - name: tmp
+  #     emptyDir: {}
+  #   - name: nginx-conf-d
+  #     configMap:
+  #       name: custom-nginx-config  # Make sure this matches the name of your ConfigMap
+  #   - name: writable-nginx-conf  # Add this writable volume for the actual Nginx configuration
+  #     emptyDir: {}
+
+  # initContainers:
+  #   - name: volume-permissions
+  #     image: busybox
+  #     command: ['sh', '-c', 'chown -R 1000:1000 /var/cache/nginx /var/run /tmp && chmod -R 775 /var/cache/nginx /var/run /tmp']
+  #     volumeMounts:
+  #       - name: var-run
+  #         mountPath: /var/run/
+  #       - name: var-cache-nginx
+  #         mountPath: /var/cache/nginx
+  #       - name: tmp
+  #         mountPath: /tmp
+  #   - name: copy-nginx-config
+  #     image: busybox
+  #     command: ['sh', '-c', 'cp /etc/nginx/config-map/* /etc/nginx/conf.d/ && chown -R 1000:1000 /etc/nginx/conf.d']
+  #     volumeMounts:
+  #       - name: nginx-conf-d
+  #         mountPath: /etc/nginx/config-map  # Temporarily mount the ConfigMap here to copy it
+  #       - name: writable-nginx-conf
+  #         mountPath: /etc/nginx/conf.d
+
+  # service:
+  #   type: ClusterIP
+  #   ports:
+  #     - name: http
+  #       port: 80  # The service port can still be 80
+  #       targetPort: 8080  # The container port should be the non-privileged port
+
+## @section Pod Sweeper parameters
+
+pod-sweeper:
+  enabled: true
+  ##  podSweeper.podAnnotations [object] Add extra annotations to the podSweeper pod
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+
+  nodeSelector:
+    node_pool: mds
+
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+server:
+  enabled: true
+  ##  server.replicaCount Number of server replicas
+  replicaCount: 2
+
+  ##  server.podAnnotations [object] Add extra annotations to the server pod(s)
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+
+  nodeSelector:
+    node_pool: mds
+
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+  ##  server.extraVolumeMounts [array] Additional volumeMounts for server container(s).
+  ## Examples (when using `server.containerSecurityContext.readOnlyRootFilesystem=true`):
+  ## extraVolumeMounts:
+  ##   - name: tmpdir
+  ##     mountPath: /tmp
+  ##
+  extraVolumeMounts:
+    - name: gcp-secret-volume
+      mountPath: /secrets/vault-airbyte-gcs-log-creds
+    - name: tmpdir
+      mountPath: /tmp
+
+  ##  server.extraVolumes [array] Additional volumes for server pod(s).
+  ## Examples (when using `server.containerSecurityContext.readOnlyRootFilesystem=true`):
+  ## extraVolumes:
+  ##   - name: tmpdir
+  ##     emptyDir: {}
+  ##
+  extraVolumes:
+    - name: gcp-secret-volume
+      secret:
+        secretName: vault-airbyte-gcs-log-creds
+    - name: tmpdir
+      emptyDir: {}
+
+  ##  extraEnv [array] Supply extra env variables to main container using full notation
+  ## Example: (With default env vars and values taken from generated config map)
+  # extraEnv:
+  #   - name: AIRBYTE_VERSION
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: AIRBYTE_VERSION
+  #   - name: API_URL
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: API_URL
+  #   - name: TRACKING_STRATEGY
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: TRACKING_STRATEGY
+  #   - name: FULLSTORY
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: FULLSTORY
+  #   - name: INTERNAL_API_HOST
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: INTERNAL_API_HOST
+  ##
+  extraEnv:
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_PASSWORD
+    - name: DATABASE_USER
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_USER
+
+  ##  secrets [object] Supply additional secrets to container
+  ## Example:
+  ## secrets:
+  ##   DATABASE_PASSWORD: strong-password
+  ##   DATABASE_USER: my-db-user
+  secrets: {}
+
+  ##  env_vars [object] Supply extra env variables to main container using simplified notation
+  ## Example:
+  ## env_vars:
+  ##   DATABASE_HOST: airbyte-db
+  ##   DATABASE_PORT: 5432
+  env_vars: {}
+  resources:
+    limits:
+      cpu: 400m
+      memory: 2Gi
+    requests:
+      memory: 1Gi
+      cpu: 00m
+## @section Worker Parameters
+
+worker:
+  enabled: true
+  ##  worker.replicaCount Number of worker replicas
+  replicaCount: 1
+
+
+  ##  worker.podAnnotations [object] Add extra annotations to the worker pod(s)
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+
+  nodeSelector:
+    node_pool: mds
+
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+  ##  worker.extraEnv [array] Additional env vars for worker pod(s).
+  ## Example:
+  ##
+  ## extraEnv:
+  ## - name: JOB_KUBE_TOLERATIONS
+  ##   value: "key=airbyte-server,operator=Equals,value=true,effect=NoSchedule"
+  extraEnv:
+    - name: KUBERNETES_REQUEST_TIMEOUT
+      value: "60000"
+    - name: KUBERNETES_CONNECTION_TIMEOUT
+      value: "30000"
+
+  ##  worker.extraVolumeMounts [array] Additional volumeMounts for worker container(s).
+  ## Examples (when using `worker.containerSecurityContext.readOnlyRootFilesystem=true`):
+  ## extraVolumeMounts:
+  ##   - name: tmpdir
+  ##     mountPath: /tmp
+  ##
+  extraVolumeMounts:
+    - name: gcp-secret-volume
+      mountPath: /secrets/vault-airbyte-gcs-log-creds
+    - name: tmpdir
+      mountPath: /tmp
+
+  ##  server.extraVolumes [array] Additional volumes for server pod(s).
+  ## Examples (when using `server.containerSecurityContext.readOnlyRootFilesystem=true`):
+  ## extraVolumes:
+  ##   - name: tmpdir
+  ##     emptyDir: {}
+  ##
+  extraVolumes:
+    - name: gcp-secret-volume
+      secret:
+        secretName: vault-airbyte-gcs-log-creds
+    - name: tmpdir
+      emptyDir: {}
+
+  resources:
+    limits:
+      cpu: 400m
+      memory: 1Gi
+    requests:
+      memory: 512Mi
+      cpu: 200m
+  ##  worker.log.level The log level to log at.
+  log:
+    level: "ERROR"
+
+## @section Metrics parameters
+metrics:
+  enabled: true
+
+  ##  metrics.replicaCount Number of metrics-reporter replicas
+  replicaCount: 1
+
+  ##  metrics.podAnnotations [object] Add extra annotations to the metrics-reporter pod
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+
+  ##  metrics.podLabels [object] Add extra labels to the metrics-reporter pod
+  ##
+  podLabels: {}
+
+  ##  metrics.containerSecurityContext Security context for the container
+  ## Examples:
+  ## containerSecurityContext:
+  ##    runAsNonRoot: true
+  ##    runAsUser: 1000
+  ##    readOnlyRootFilesystem: true
+  # containerSecurityContext: {}
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+  extraVolumeMounts:
+    - name: tmpdir
+      mountPath: /tmp
+
+  extraVolumes:
+    - name: tmpdir
+      emptyDir: {}
+
+  ## metrics-reporter app resource requests and limits
+  ## ref: http://kubernetes.io/docs/user-guide/compute-resources/
+  ## We usually recommend not to specify default resources and to leave this as a conscious
+  ## choice for the user. This also increases chances charts run on environments with little
+  ## resources, such as Minikube. If you do want to specify resources, uncomment the following
+  ## lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  ##  metrics.resources.limits [object] The resources limits for the metrics-reporter container
+  ##  metrics.resources.requests [object] The requested resources for the metrics-reporter container
+  resources:
+    ## Example:
+    ## limits:
+    ##    cpu: 200m
+    ##    memory: 1Gi
+    limits: {}
+    ## Examples:
+    ## requests:
+    ##    memory: 256Mi
+    ##    cpu: 250m
+    requests: {}
+
+  ##  metrics.nodeSelector [object] Node labels for pod assignment
+  ## Ref: https://kubernetes.io/docs/user-guide/node-selection/
+  ##
+  ##  metrics.tolerations [array] Tolerations for metrics-reporter pod assignment.
+  ## ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+  ##
+  tolerations: []
+
+  nodeSelector:
+    node_pool: mds
+
+
+## @section Bootloader Parameters
+
+airbyte-bootloader:
+  enabled: true
+
+  ##  podAnnotations [object] Add extra annotations to the bootloader pod
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+
+  nodeSelector:
+    node_pool: mds
+
+  ##  extraEnv [array] Supply extra env variables to main container using full notation
+  ## Example: (With default env vars and values taken from generated config map)
+  ## extraEnv:
+  ##   - name: AIRBYTE_VERSION
+  ##     valueFrom:
+  ##       configMapKeyRef:
+  ##         name: airbyte-env
+  ##         key: AIRBYTE_VERSION
+  ##   - name: DATABASE_HOST
+  ##     valueFrom:
+  ##       configMapKeyRef:
+  ##         name: airbyte-env
+  ##         key: DATABASE_HOST
+  ##   - name: DATABASE_PORT
+  ##     valueFrom:
+  ##       configMapKeyRef:
+  ##         name: airbyte-env
+  ##         key: DATABASE_PORT
+  ##   - name: DATABASE_PASSWORD
+  ##     valueFrom:
+  ##       secretKeyRef:
+  ##         name: airbyte-secrets
+  ##         key: DATABASE_PASSWORD
+  ##   - name: DATABASE_URL
+  ##     valueFrom:
+  ##       configMapKeyRef:
+  ##         name: airbyte-env
+  ##         key: DATABASE_URL
+  ##   - name: DATABASE_USER
+  ##     valueFrom:
+  ##       secretKeyRef:
+  ##         name: airbyte-secrets
+  ##         key: DATABASE_USER
+  ##
+  extraEnv:
+    - name: DATABASE_URL
+      valueFrom:
+        configMapKeyRef:
+          name: airbyte-airbyte-env
+          key: DATABASE_URL
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_PASSWORD
+    - name: DATABASE_USER
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_USER
+  ##  secrets [object] Supply additional secrets to container
+  ## Example:
+  ## secrets:
+  ##   DATABASE_PASSWORD: strong-password
+  ##   DATABASE_USER: my-db-user
+  secrets: {}
+
+  ##  env_vars [object] Supply extra env variables to main container using simplified notation
+  ## Example:
+  ## env_vars:
+  ##   DATABASE_HOST: airbyte-db
+  ##   DATABASE_PORT: 5432
+  env_vars:
+    DATABASE_HOST: 10.100.0.3
+    DATABASE_PORT: 5432
+
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+  extraVolumeMounts:
+    - name: tmpdir
+      mountPath: /tmp
+
+  extraVolumes:
+    - name: tmpdir
+      emptyDir: {}
+
+## @section Temporal parameters
+## TODO: Move to consuming temporal from a dedicated helm chart
+
+temporal:
+  enabled: true
+  ##  temporal.replicaCount The number of temporal replicas to deploy
+  replicaCount: 1
+
+  ##  temporal.podAnnotations [object] Add extra annotations to the temporal pod
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+
+  nodeSelector:
+    node_pool: mds
+
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+  extraInitContainers:
+    - name: config-loader
+      image: temporalio/auto-setup:1.20.1
+      command:
+        - /bin/sh
+        - -c
+        - >-
+          find /etc/temporal/config/ -maxdepth 1 -mindepth 1 -exec cp -ar {} /config/ \;
+      volumeMounts:
+        - name: config
+          mountPath: /config
+
+  extraVolumeMounts:
+    - name: tmpdir
+      mountPath: /tmp
+    - name: config
+      mountPath: /etc/temporal/config
+
+  extraVolumes:
+    - name: tmpdir
+      emptyDir: {}
+    - name: config
+      emptyDir: {}
+
+  resources:
+    limits:
+      cpu: 300m
+      memory: 512Mi
+    requests:
+      memory: 256Mi
+      cpu: 250m
+## PostgreSQL chart configuration
+## ref: https://github.com/bitnami/charts/blob/master/bitnami/postgresql/values.yaml
+##  postgresql.enabled Switch to enable or disable the PostgreSQL helm chart
+##  postgresql.postgresqlUsername Airbyte Postgresql username
+##  postgresql.postgresqlPassword Airbyte Postgresql password
+##  postgresql.postgresqlDatabase Airbyte Postgresql database
+##  postgresql.existingSecret Name of an existing secret containing the PostgreSQL password ('postgresql-password' key)
+##  postgresql.containerSecurityContext.runAsNonRoot Ensures the container will run with a non-root user
+##  postgresql.commonAnnotations.helm.sh/hook It will determine when the hook should be rendered
+##  postgresql.commonAnnotations.helm.sh/hook-weight The order in which the hooks are executed. If weight is lower, it has higher priority
+##
+postgresql:
+  enabled: false
+
+  containerSecurityContext:
+    # -- Ensures the container will run with a non-root user
+    runAsNonRoot: true
+
+## External PostgreSQL configuration
+## All of these values are only used when postgresql.enabled is set to false
+##  externalDatabase.host Database host
+##  externalDatabase.user non-root Username for Airbyte Database
+##  externalDatabase.password Database password
+##  externalDatabase.existingSecret Name of an existing secret resource containing the DB password
+##  externalDatabase.existingSecretPasswordKey Name of an existing secret key containing the DB password
+##  externalDatabase.database Database name
+##  externalDatabase.port Database port number
+##  externalDatabase.jdbcUrl Database full JDBL URL (ex: jdbc:postgresql://host:port/db?parameters)
+##
+externalDatabase:
+  host: "10.100.0.3"
+  user: "airbyte-root"
+  existingSecret: "vault-airbyte-secrets"
+  existingSecretPasswordKey: "DATABASE_PASSWORD"
+  database: airbyte
+  port: 5432
+  jdbcUrl: ""
+
+## @section Logs parameters
+
+## @section Minio chart overwrites
+##  minio.accessKey.password Minio Access Key
+##  minio.secretKey.password Minio Secret Key
+minio:
+  enabled: false
+
+
+## @section cron parameters
+
+cron:
+  enabled: true
+  ##  cron.replicaCount Number of cron replicas
+  replicaCount: 1
+
+  ##  cron.podAnnotations [object] Add extra annotations to the cron pod(s)
+  ##
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+  nodeSelector:
+    node_pool: mds
+
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    readOnlyRootFilesystem: true
+
+  extraVolumeMounts:
+    - name: tmpdir
+      mountPath: /tmp
+
+  extraVolumes:
+    - name: tmpdir
+      emptyDir: {}
+
+  ##  extraEnv [array] Supply extra env variables to main container using full notation
+  ## Example: (With default env vars and values taken from generated config map)
+  # extraEnv:
+  #   - name: AIRBYTE_VERSION
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: AIRBYTE_VERSION
+  #   - name: API_URL
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: API_URL
+  #   - name: TRACKING_STRATEGY
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: TRACKING_STRATEGY
+  #   - name: FULLSTORY
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: FULLSTORY
+  #   - name: INTERNAL_API_HOST
+  #     valueFrom:
+  #       configMapKeyRef:
+  #         name: airbyte-env
+  #         key: INTERNAL_API_HOST
+  ##
+  extraEnv:
+    - name: POSTGRES_PWD
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_PASSWORD
+    - name: POSTGRES_USER
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_USER
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_PASSWORD
+    - name: DATABASE_USER
+      valueFrom:
+        secretKeyRef:
+          name: vault-airbyte-secrets
+          key: DATABASE_USER
+
+
+connector-builder-server:
+  enabled: true
+  ##  connector-builder-server.replicaCount Number of connector-builder-server replicas
+  replicaCount: 1
+
+  nodeSelector:
+    node_pool: mds
+  resources:
+    limits:
+      cpu: 800m
+      memory: 1Gi
+    requests:
+      memory: 512Mi
+      cpu: 200m
+
+airbyte-api-server:
+  enabled: true
+  ##  airbyte-api-server.replicaCount Number of airbyte-api-server replicas
+  replicaCount: 2
+  nodeSelector:
+    node_pool: mds
+  log:
+    level: "ERROR"
+  resources:
+    limits:
+      cpu: 1200m
+      memory: 2Gi
+    requests:
+      memory: 1Gi
+      cpu: 800m
+  env_vars:
+    INTERNAL_API_HOST: http://airbyte-airbyte-server-svc:8001
